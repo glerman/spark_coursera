@@ -20,7 +20,7 @@ object WikipediaRanking {
   val conf: SparkConf = new SparkConf().setMaster("local").setAppName("My app")
   val sc: SparkContext = new SparkContext(conf)
   // Hint: use a combination of `sc.textFile`, `WikipediaData.filePath` and `WikipediaData.parse`
-  val wikiRdd: RDD[WikipediaArticle] = sc.textFile(WikipediaData.filePath).map(WikipediaData.parse).cache()
+  val wikiRdd: RDD[WikipediaArticle] = sc.textFile(WikipediaData.filePath).map(WikipediaData.parse)
 
   /** Returns the number of articles on which the language `lang` occurs.
    *  Hint1: consider using method `aggregate` on RDD[T].
@@ -47,10 +47,16 @@ object WikipediaRanking {
    * to the Wikipedia pages in which it occurs.
    */
   def makeIndex(langs: List[String], rdd: RDD[WikipediaArticle]): RDD[(String, Iterable[WikipediaArticle])] = {
+    langAndReferencingArticlePairs(langs, rdd).groupByKey()
+  }
+
+  /**
+    * @return Articles that reference multiple langs will return multiple times
+    */
+  def langAndReferencingArticlePairs(langs: List[String], rdd: RDD[WikipediaArticle]): RDD[(String, WikipediaArticle)] = {
     val articleAndLangPairs: RDD[(WikipediaArticle, List[String])] = rdd.map(article => (article, langs.filter(lang => article.mentionsLanguage(lang))))
     articleAndLangPairs.flatMapValues(identity)
       .map(_.swap)
-      .groupByKey()
   }
 
 
@@ -60,7 +66,10 @@ object WikipediaRanking {
    *   Note: this operation is long-running. It can potentially run for
    *   several seconds.
    */
-  def rankLangsUsingIndex(index: RDD[(String, Iterable[WikipediaArticle])]): List[(String, Int)] = ???
+  def rankLangsUsingIndex(index: RDD[(String, Iterable[WikipediaArticle])]): List[(String, Int)] =
+    index.mapValues(_.size)
+      .collect().toList
+      .sortBy({case (_, occurrences) => -occurrences})
 
   /* (3) Use `reduceByKey` so that the computation of the index and the ranking are combined.
    *     Can you notice an improvement in performance compared to measuring *both* the computation of the index
@@ -69,7 +78,11 @@ object WikipediaRanking {
    *   Note: this operation is long-running. It can potentially run for
    *   several seconds.
    */
-  def rankLangsReduceByKey(langs: List[String], rdd: RDD[WikipediaArticle]): List[(String, Int)] = ???
+  def rankLangsReduceByKey(langs: List[String], rdd: RDD[WikipediaArticle]): List[(String, Int)] = {
+    langAndReferencingArticlePairs(langs, rdd)
+      .mapValues(_ => 1).reduceByKey(_ + _)
+      .sortBy({case (_, occurrences) => -occurrences}).collect().toList
+  }
 
   def main(args: Array[String]) {
 
@@ -79,16 +92,18 @@ object WikipediaRanking {
 
     /* An inverted index mapping languages to wikipedia pages on which they appear */
     def index: RDD[(String, Iterable[WikipediaArticle])] = makeIndex(langs, wikiRdd)
-    println(index.count())
 
 //    /* Languages ranked according to (2), using the inverted index */
-//    val langsRanked2: List[(String, Int)] = timed("Part 2: ranking using inverted index", rankLangsUsingIndex(index))
+    val langsRanked2: List[(String, Int)] = timed("Part 2: ranking using inverted index", rankLangsUsingIndex(index))
+    println(s"langs ranked 2: $langsRanked2")
 
     /* Languages ranked according to (3) */
-//    val langsRanked3: List[(String, Int)] = timed("Part 3: ranking using reduceByKey", rankLangsReduceByKey(langs, wikiRdd))
+    val langsRanked3: List[(String, Int)] = timed("Part 3: ranking using reduceByKey", rankLangsReduceByKey(langs, wikiRdd))
+    println(s"langs ranked 3: $langsRanked3")
 
     /* Output the speed of each ranking */
     println(timing)
+    if(langsRanked != langsRanked2 || langsRanked != langsRanked3 || langsRanked2 != langsRanked3) throw new IllegalStateException("Ranking not equal")
     sc.stop()
   }
 

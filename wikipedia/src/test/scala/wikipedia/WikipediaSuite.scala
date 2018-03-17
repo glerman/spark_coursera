@@ -4,8 +4,6 @@ import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
 import org.scalatest.{BeforeAndAfterAll, FunSuite}
 
-import scala.collection.immutable
-
 @RunWith(classOf[JUnitRunner])
 class WikipediaSuite extends FunSuite with BeforeAndAfterAll {
 
@@ -95,13 +93,14 @@ class WikipediaSuite extends FunSuite with BeforeAndAfterAll {
     import WikipediaRanking._
     val langs = List("Scala", "Java")
     val rdd = sc.parallelize(List(WikipediaArticle("1", "Scala is great"), WikipediaArticle("2", "Java is OK, but Scala is cooler")))
-    val ranked: immutable.Seq[(String, Int)] = rankLangs(langs, rdd)
+    val ranked = rankLangs(langs, rdd)
     val res = ranked.head._1 == "Scala"
     assert(res)
     assert(ranked.size === 2)
     val map: Map[String, Int] = ranked.toMap
     assert(map("Scala") === 2)
     assert(map("Java") === 1)
+    assertEquivalentAndOrdered(ranked, List(("Scala", 2), ("Java", 1)))
   }
 
   test("'makeIndex' creates a simple index with two entries") {
@@ -114,11 +113,12 @@ class WikipediaSuite extends FunSuite with BeforeAndAfterAll {
         WikipediaArticle("3","Scala is not purely functional")
       )
     val rdd = sc.parallelize(articles)
-    val index: Map[String, Iterable[WikipediaArticle]] = makeIndex(langs, rdd).collect().toMap
-    val res = index.size === 2
+    val index = makeIndex(langs, rdd)
+    val res = index.count() === 2
     assert(res)
-    assert(index("Scala").size === 2)
-    assert(index("Java").size === 1)
+    val map = index.collect().toMap
+    assert(map("Scala").size === 2)
+    assert(map("Java").size === 1)
   }
 
   test("'rankLangsUsingIndex' should work for a simple RDD with three elements") {
@@ -135,6 +135,7 @@ class WikipediaSuite extends FunSuite with BeforeAndAfterAll {
     val ranked = rankLangsUsingIndex(index)
     val res = ranked.head._1 == "Scala"
     assert(res)
+    assertEquivalentAndOrdered(ranked, List(("Scala", 2), ("Java", 1)))
   }
 
   test("'rankLangsReduceByKey' should work for a simple RDD with four elements") {
@@ -152,6 +153,20 @@ class WikipediaSuite extends FunSuite with BeforeAndAfterAll {
     val ranked = rankLangsReduceByKey(langs, rdd)
     val res = ranked.head._1 == "Java"
     assert(res)
+    assertEquivalentAndOrdered(ranked, List(("Java", 3), ("Scala", 2), ("Groovy", 1), ("Haskell", 1), ("Erlang", 1)))
+  }
+
+  test("Integration test") {
+    assert(initializeWikipediaRanking(), " -- did you fill in all the values in WikipediaRanking (conf, sc, wikiRdd)?")
+    import WikipediaRanking._
+    val ranking1 = rankLangs(langs, wikiRdd)
+    val ranking2 = rankLangsUsingIndex(makeIndex(langs, wikiRdd))
+    val ranking3 = rankLangsReduceByKey(langs, wikiRdd)
+
+    assertEquivalentAndOrdered(ranking1, ranking2)
+    assertEquivalentAndOrdered(ranking2, ranking3)
+    assertEquivalentAndOrdered(ranking1, ranking3)
+
   }
 
 
